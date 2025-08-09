@@ -17,6 +17,7 @@ codec  = "json"
     expect_reply = false
     deadline_ms  = 4000
     datatype     = "feedback.v1"
+    transformers = ["tagger", "sentiment"]   # <-- apply our transformer before publish
 
 # 4) Open relay.publish (no auth, no downstream creds)
 [[route]]
@@ -113,4 +114,4 @@ aes256_key_hex = "ea8ccb51eefcdd058b0110c4adebaf351acbf43db2ad250fdc0d4131c959df
 
   [[receiver.pipeline]]
   datatype = "feedback.v1"
-  transformers = ["audit-only"]
+  transformers = ["tagger"]

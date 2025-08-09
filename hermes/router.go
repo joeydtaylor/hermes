@@ -4,6 +4,7 @@ package hermes
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	chimd "github.com/go-chi/chi/v5/middleware"
+	"github.com/joeydtaylor/hermes/hermes/transform"
 	"github.com/joeydtaylor/hermes/middleware/auth"
 	"github.com/joeydtaylor/hermes/middleware/logger"
 	hmetrics "github.com/joeydtaylor/hermes/middleware/metrics"
@@ -25,7 +27,7 @@ type BuildDeps struct {
 	Relay   RelayClient
 	Router  httpx.Router
 	Typed   TypedPublisher
-	Creds   CredentialsProvider // optional; if nil, policy-driven defaults are used
+	Creds   CredentialsProvider
 }
 
 // cache env once
@@ -174,6 +176,8 @@ func wrapRoute(rt Route, d BuildDeps) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			canon := body
+
+			// 1) Canonicalize if a datatype is declared
 			typeName := strings.TrimSpace(rt.Handler.Relay.DataType)
 			if typeName != "" {
 				_, out, err := ValidateAndCanonicalize(typeName, body)
@@ -183,35 +187,81 @@ func wrapRoute(rt Route, d BuildDeps) http.HandlerFunc {
 				}
 				canon = out
 			}
-			if d.Typed != nil && typeName != "" {
-				bind, ok := typeReg[typeName]
-				if !ok {
-					http.Error(w, "unregistered type "+typeName, http.StatusBadRequest)
+
+			// 2) Publish-side transforms (manifest-driven) using registry-declared type
+			if rs := rt.Handler.Relay; rs != nil && len(rs.Transformers) > 0 && typeName != "" {
+				fmt.Printf("DEBUG publish: applying %v for type %q\n", rs.Transformers, typeName)
+
+				adapters, elemType, err := transform.ResolveWithType(typeName, rs.Transformers)
+				if err != nil {
+					http.Error(w, "transform resolve: "+err.Error(), http.StatusBadRequest)
 					return
 				}
-				dst := bind.zero()
-				if err := json.Unmarshal(canon, dst); err != nil {
-					http.Error(w, "decode typed: "+err.Error(), http.StatusBadRequest)
+
+				// Allocate a *T, unmarshal canon JSON into it.
+				dstPtr := reflect.New(elemType).Interface()
+				if err := json.Unmarshal(canon, dstPtr); err != nil {
+					http.Error(w, "decode: "+err.Error(), http.StatusBadRequest)
 					return
 				}
-				hdrs := map[string]string{"X-Relay-Type": typeName}
-				if rid := chimd.GetReqID(r.Context()); rid != "" {
-					hdrs["X-Request-Id"] = rid
-				}
-				if creds, err := issueCreds(d, r, rt); err == nil && creds.HeaderName != "" {
-					hdrs[creds.HeaderName] = creds.HeaderValue
-					for k, v := range creds.Extra {
-						hdrs[k] = v
+				val := reflect.ValueOf(dstPtr).Elem().Interface()
+				fmt.Printf("DEBUG publish: before transforms: %#v\n", val)
+
+				for _, fn := range adapters {
+					val, err = fn(val)
+					if err != nil {
+						http.Error(w, "transform: "+err.Error(), http.StatusBadRequest)
+						return
 					}
+					fmt.Printf("DEBUG publish: after step: %#v\n", val)
 				}
-				val := reflect.ValueOf(dst).Elem().Interface()
-				if err := d.Typed.Publish(r.Context(), rt.Handler.Relay.Topic, typeName, val, hdrs); err != nil {
-					http.Error(w, err.Error(), http.StatusBadGateway)
+
+				out, err := json.Marshal(val)
+				if err != nil {
+					http.Error(w, "encode: "+err.Error(), http.StatusBadRequest)
 					return
 				}
-				w.WriteHeader(http.StatusAccepted)
-				return
+				canon = out
+
+				// safety: re-canonicalize
+				if _, out2, err := ValidateAndCanonicalize(typeName, canon); err == nil {
+					canon = out2
+				}
+			} else if typeName != "" {
+				fmt.Printf("DEBUG publish: no transforms for type %q (list empty or missing)\n", typeName)
 			}
+
+			// 3A) Typed path
+			if d.Typed != nil && typeName != "" {
+				// Use the same type the transform chain expects, if any; otherwise just publish bytes.
+				if _, elemType, err := transform.ResolveWithType(typeName, rt.Handler.Relay.Transformers); err == nil && elemType != nil {
+					dstPtr := reflect.New(elemType).Interface()
+					if err := json.Unmarshal(canon, dstPtr); err != nil {
+						http.Error(w, "decode typed: "+err.Error(), http.StatusBadRequest)
+						return
+					}
+					val := reflect.ValueOf(dstPtr).Elem().Interface()
+
+					hdrs := map[string]string{"X-Relay-Type": typeName}
+					if rid := chimd.GetReqID(r.Context()); rid != "" {
+						hdrs["X-Request-Id"] = rid
+					}
+					if creds, err := issueCreds(d, r, rt); err == nil && creds.HeaderName != "" {
+						hdrs[creds.HeaderName] = creds.HeaderValue
+						for k, v := range creds.Extra {
+							hdrs[k] = v
+						}
+					}
+					if err := d.Typed.Publish(r.Context(), rt.Handler.Relay.Topic, typeName, val, hdrs); err != nil {
+						http.Error(w, err.Error(), http.StatusBadGateway)
+						return
+					}
+					w.WriteHeader(http.StatusAccepted)
+					return
+				}
+			}
+
+			// 3B) Byte-level path
 			if d.Relay == nil {
 				http.Error(w, "relay unavailable", http.StatusBadGateway)
 				return

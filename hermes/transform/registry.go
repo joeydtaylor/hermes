@@ -2,6 +2,7 @@ package transform
 
 import (
 	"fmt"
+	"reflect"
 	"sync"
 )
 
@@ -52,4 +53,36 @@ func Resolve[T any](datatype string, names []string) ([]Transformer[T], error) {
 		out = append(out, fn)
 	}
 	return out, nil
+}
+
+// ApplyDynamic applies named transformers in-order to a value of the correct concrete type.
+// v must be the exact T (not *T). Returns the new T as interface{}.
+func ApplyDynamic(datatype string, v any, names []string) (any, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	m, ok := reg[datatype]
+	if !ok {
+		return nil, fmt.Errorf("transform: no registry for %q", datatype)
+	}
+	cur := v
+	for _, n := range names {
+		raw, ok := m[n]
+		if !ok {
+			return nil, fmt.Errorf("transform: %q not found in %q", n, datatype)
+		}
+		fn := reflect.ValueOf(raw)
+		if fn.Kind() != reflect.Func || fn.Type().NumIn() != 1 || fn.Type().NumOut() != 2 {
+			return nil, fmt.Errorf("transform: invalid function shape for %q/%q", datatype, n)
+		}
+		in := reflect.ValueOf(cur)
+		if !in.IsValid() || in.Type() != fn.Type().In(0) {
+			return nil, fmt.Errorf("transform: type mismatch for %q/%q", datatype, n)
+		}
+		out := fn.Call([]reflect.Value{in})
+		if !out[1].IsNil() {
+			return nil, out[1].Interface().(error)
+		}
+		cur = out[0].Interface()
+	}
+	return cur, nil
 }

@@ -21,9 +21,6 @@ services:
       ELECTRICIAN_RX_TLS_CA:         /app/etc/keys/tls/ca.crt
       ELECTRICIAN_RX_TLS_SERVER_NAME: "localhost"
 
-      # Disable forward relay to avoid loop during local test
-      ELECTRICIAN_TARGET: ""
-
       # Auth/session + OAuth endpoints to damocles (same as before)
       SESSION_STATE_API: https://damocles:3000/api/auth/session
       OAUTH_ISSUER_BASE: https://damocles:3000

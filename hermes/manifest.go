@@ -81,10 +81,11 @@ type ProxySpec struct {
 }
 
 type RelaySpec struct {
-	Topic       string `toml:"topic"`
-	ExpectReply bool   `toml:"expect_reply"`
-	DeadlineMS  int    `toml:"deadline_ms"`
-	DataType    string `toml:"datatype,omitempty"`
+	Topic        string   `toml:"topic"`
+	ExpectReply  bool     `toml:"expect_reply"`
+	DeadlineMS   int      `toml:"deadline_ms"`
+	DataType     string   `toml:"datatype,omitempty"`
+	Transformers []string `toml:"transformers"` // optional publish-side transforms
 }
 
 /* ===========================
@@ -120,8 +121,8 @@ type ReceiverPipeline struct {
 }
 
 type Receiver struct {
-	Address    string             `toml:"address"`      // host:port
-	BufferSize int                `toml:"buffer_size"`  // optional; default 1024
+	Address    string             `toml:"address"`     // host:port
+	BufferSize int                `toml:"buffer_size"` // optional; default 1024
 	AES256Hex  string             `toml:"aes256_key_hex"`
 	TLS        *ReceiverTLS       `toml:"tls"`
 	OAuth      *ReceiverOAuth     `toml:"oauth"`
@@ -144,6 +145,15 @@ func (c *Config) Validate() error {
 		}
 		// Fast-fail: datatype must be registered when present
 		if rs := c.Routes[i].Handler.Relay; rs != nil && strings.TrimSpace(rs.DataType) != "" {
+			if _, ok := typeReg[rs.DataType]; !ok {
+				return fmt.Errorf("handler.relay.datatype %q not registered", rs.DataType)
+			}
+		}
+		// If publish-side transformers are set, datatype is required and must be registered
+		if rs := c.Routes[i].Handler.Relay; rs != nil && len(rs.Transformers) > 0 {
+			if strings.TrimSpace(rs.DataType) == "" {
+				return fmt.Errorf("handler.relay.transformers specified but datatype is empty")
+			}
 			if _, ok := typeReg[rs.DataType]; !ok {
 				return fmt.Errorf("handler.relay.datatype %q not registered", rs.DataType)
 			}

@@ -17,8 +17,29 @@ import (
 	"time"
 
 	"github.com/joeydtaylor/electrician/pkg/builder"
-	"github.com/joeydtaylor/hermes/hermes"
 )
+
+// RelayRequest is the byte-level publish/request envelope.
+type RelayRequest struct {
+	Topic   string
+	Body    []byte
+	Headers map[string]string
+	Timeout time.Duration
+}
+
+// RelayClient is the minimal interface the router needs.
+type RelayClient interface {
+	Request(ctx context.Context, rr RelayRequest) ([]byte, error)
+	Publish(ctx context.Context, rr RelayRequest) error
+}
+
+// noopRelay accepts publishes and discards them; Request is unsupported.
+type noopRelay struct{}
+
+func (noopRelay) Request(context.Context, RelayRequest) ([]byte, error) {
+	return nil, fmt.Errorf("electrician(noop): request/reply unsupported")
+}
+func (noopRelay) Publish(context.Context, RelayRequest) error { return nil }
 
 type builderClient struct {
 	once   sync.Once
@@ -26,7 +47,7 @@ type builderClient struct {
 	submit func(context.Context, []byte) error // captures wire.Submit
 }
 
-// NewBuilderRelayFromEnv returns a publish-capable hermes.RelayClient
+// NewBuilderRelayFromEnv returns a publish-capable RelayClient
 // powered by Electrician's ForwardRelay[[]byte]. It expects:
 //
 //	ELECTRICIAN_TARGET          = "host:port[,host2:port2]"   (required)
@@ -54,11 +75,11 @@ type builderClient struct {
 //	OAUTH_SCOPES                = "s1,s2"
 //	OAUTH_REFRESH_LEEWAY        = "20s" (optional; default 20s)
 //
-// If ELECTRICIAN_TARGET is absent, it returns hermes.NoopRelay{}.
-func NewBuilderRelayFromEnv() (hermes.RelayClient, error) {
+// If ELECTRICIAN_TARGET is absent, it returns a noop RelayClient.
+func NewBuilderRelayFromEnv() (RelayClient, error) {
 	raw := strings.TrimSpace(os.Getenv("ELECTRICIAN_TARGET"))
 	if raw == "" {
-		return hermes.NoopRelay{}, nil
+		return noopRelay{}, nil
 	}
 	targets := strings.Split(raw, ",")
 
@@ -180,12 +201,12 @@ func NewBuilderRelayFromEnv() (hermes.RelayClient, error) {
 }
 
 // Request is unsupported in builder mode (stream/publish only).
-func (c *builderClient) Request(ctx context.Context, rr hermes.RelayRequest) ([]byte, error) {
+func (c *builderClient) Request(ctx context.Context, rr RelayRequest) ([]byte, error) {
 	return nil, fmt.Errorf("electrician(builder): request/reply unsupported")
 }
 
 // Publish sends bytes into the pipeline. Topic/headers ride the relay path.
-func (c *builderClient) Publish(ctx context.Context, rr hermes.RelayRequest) error {
+func (c *builderClient) Publish(ctx context.Context, rr RelayRequest) error {
 	if rr.Topic == "" {
 		return fmt.Errorf("relay: missing topic")
 	}
