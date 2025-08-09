@@ -1,0 +1,7 @@
+.env
+.vscode
+keys/ServerSslCertificate.crt
+keys/ServerSslPrivate.key
+tmp
+log
+*.exe

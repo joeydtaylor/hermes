@@ -1,0 +1,54 @@
+# 3) Auth-required relay.publish (cookie passthrough downstream; no reply)
+[[route]]
+path   = "/orders"
+method = "POST"
+codec  = "json"
+  [route.guard]
+  require_auth = true
+  roles = ["developer","admin"]
+  [route.policy]
+  timeout_ms = 5000
+  [route.policy.downstream_auth]
+  type = "passthrough-cookie"
+  [route.handler]
+  type = "relay.publish"
+    [route.handler.relay]
+    topic        = "orders.create"
+    expect_reply = false
+    deadline_ms  = 4000
+    datatype     = "feedback.v1"
+
+# 4) Open relay.publish (no auth, no downstream creds)
+[[route]]
+path   = "/orders/open"
+method = "POST"
+codec  = "json"
+  [route.policy]
+  timeout_ms = 3000
+  [route.handler]
+  type = "relay.publish"
+    [route.handler.relay]
+    topic        = "orders.events"
+    expect_reply = false
+    deadline_ms  = 1000
+    datatype     = "feedback.v1"
+
+# 5) Auth-required relay.publish with static bearer downstream
+[[route]]
+path   = "/billing"
+method = "POST"
+codec  = "json"
+  [route.guard]
+  require_auth = true
+  roles = ["developer","admin"]
+  [route.policy]
+  timeout_ms = 5000
+  [route.policy.downstream_auth]
+  type = "static-bearer"
+  [route.handler]
+  type = "relay.publish"
+    [route.handler.relay]
+    topic        = "billing.charge"
+    expect_reply = false
+    deadline_ms  = 4000
+    datatype     = "feedback.v1"
