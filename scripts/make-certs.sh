@@ -15,7 +15,7 @@ set -euo pipefail
 
 # Resolve paths relative to this script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT_DIR="${SCRIPT_DIR}/../keys/tls"
+OUT_DIR="${SCRIPT_DIR}/../../etc/keys/tls"
 SAN_SRC="${OUT_DIR}/san.cnf"
 FIXED_SAN="${OUT_DIR}/san.fixed.cnf"
 CLIENT_EXT="${OUT_DIR}/client_ext.cnf"
