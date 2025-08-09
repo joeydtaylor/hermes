@@ -1,0 +1,47 @@
+services:
+  hermes:
+    build: .
+    image: steeze/hermes:dev
+    container_name: hermes
+
+    env_file:
+      - ./.env
+
+    environment:
+      # Let Hermes find the manifest & listen on all interfaces
+      HERMES_MANIFEST: /app/manifest.toml
+      SERVER_LISTEN_ADDRESS: "0.0.0.0:4000"
+
+      # Point auth/session + OAuth endpoints to the damocles service (shared net)
+      SESSION_STATE_API: https://damocles:3000/api/auth/session
+      OAUTH_ISSUER_BASE: https://damocles:3000
+      OAUTH_JWKS_URL: https://damocles:3000/api/auth/.well-known/jwks.json
+
+      # Trust the custom CA when Hermes calls Damocles over HTTPS
+      SSL_CERT_FILE: /app/keys/tls/ca.crt
+
+    ports:
+      - "4000:4000"
+
+    volumes:
+      - ./manifest.toml:/app/manifest.toml:ro
+      - ./keys/tls:/app/keys/tls:ro
+      - ./log:/app/log
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "https://localhost:4000/ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+
+    networks:
+      - steeze-edge
+
+networks:
+  steeze-edge:
+    external: true
