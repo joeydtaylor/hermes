@@ -8,28 +8,44 @@ services:
       - ./.env
 
     environment:
-      # Let Hermes find the manifest & listen on all interfaces
+      # Hermes core
       HERMES_MANIFEST: /app/manifest.toml
       SERVER_LISTEN_ADDRESS: "0.0.0.0:4000"
+      SSL_SERVER_CERTIFICATE: /app/etc/keys/tls/server.crt
+      SSL_SERVER_KEY:         /app/etc/keys/tls/server.key
 
-      # Point auth/session + OAuth endpoints to the damocles service (shared net)
+      # Receiver TLS (server side for gRPC on 50051/50052)
+      ELECTRICIAN_RX_TLS_ENABLE: "true"
+      ELECTRICIAN_RX_TLS_SERVER_CRT: /app/etc/keys/tls/server.crt
+      ELECTRICIAN_RX_TLS_SERVER_KEY: /app/etc/keys/tls/server.key
+      ELECTRICIAN_RX_TLS_CA:         /app/etc/keys/tls/ca.crt
+      ELECTRICIAN_RX_TLS_SERVER_NAME: "localhost"
+
+      # Disable forward relay to avoid loop during local test
+      ELECTRICIAN_TARGET: ""
+
+      # Auth/session + OAuth endpoints to damocles (same as before)
       SESSION_STATE_API: https://damocles:3000/api/auth/session
       OAUTH_ISSUER_BASE: https://damocles:3000
-      OAUTH_JWKS_URL: https://damocles:3000/api/auth/.well-known/jwks.json
+      OAUTH_JWKS_URL:    https://damocles:3000/api/auth/.well-known/jwks.json
 
-      # Trust the custom CA when Hermes calls Damocles over HTTPS
-      SSL_CERT_FILE: /app/keys/tls/ca.crt
+      # Trust custom CA when Hermes calls Damocles
+      SSL_CERT_FILE: /app/etc/keys/tls/ca.crt
 
     ports:
-      - "4000:4000"
+      - "4000:4000"   # HTTPS API
+      - "50051:50051" # Receiver A
+      - "50052:50052" # Receiver B
 
     volumes:
       - ./manifest.toml:/app/manifest.toml:ro
-      - ./keys/tls:/app/keys/tls:ro
+      - ./etc/keys/tls:/app/etc/keys/tls:ro
       - ./log:/app/log
 
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "https://localhost:4000/ping"]
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error",
+             "--cacert", "/app/etc/keys/tls/ca.crt",
+             "https://localhost:4000/ping"]
       interval: 10s
       timeout: 3s
       retries: 5

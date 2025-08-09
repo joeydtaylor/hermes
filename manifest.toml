@@ -52,3 +52,65 @@ codec  = "json"
     expect_reply = false
     deadline_ms  = 4000
     datatype     = "feedback.v1"
+
+# existing routes…
+
+# receiver A: apply sentiment then tagger on feedback.v1
+[[receiver]]
+address = "0.0.0.0:50051"
+buffer_size = 1024
+aes256_key_hex = "ea8ccb51eefcdd058b0110c4adebaf351acbf43db2ad250fdc0d4131c959dfec"
+
+  [receiver.tls]
+  enable = true
+  server_cert = "tls/server.crt"
+  server_key  = "tls/server.key"
+  ca          = "tls/ca.crt"
+  server_name = "localhost"
+
+  [receiver.oauth]
+  mode = "merge"
+  issuer_base = "https://damocles:3000"
+  jwks_url = "https://damocles:3000/api/auth/.well-known/jwks.json"
+  required_aud = ["your-api"]
+  required_scopes = ["write:data"]
+  jwks_cache_seconds = 300
+  introspect_url = "https://damocles:3000/api/auth/oauth/introspect"
+  auth_type = "basic"
+  client_id = "steeze-local-cli"
+  client_secret = "local-secret"
+  cache_seconds = 300
+
+  [[receiver.pipeline]]
+  datatype = "feedback.v1"
+  transformers = ["sentiment", "tagger"]
+
+# receiver B: same TLS/AES/OAuth as 50051, different pipeline
+[[receiver]]
+address = "0.0.0.0:50052"
+buffer_size = 1024
+aes256_key_hex = "ea8ccb51eefcdd058b0110c4adebaf351acbf43db2ad250fdc0d4131c959dfec"
+
+  [receiver.tls]
+  enable = true
+  server_cert = "tls/server.crt"
+  server_key  = "tls/server.key"
+  ca          = "tls/ca.crt"
+  server_name = "localhost"
+
+  [receiver.oauth]
+  mode = "merge"
+  issuer_base = "https://damocles:3000"
+  jwks_url = "https://damocles:3000/api/auth/.well-known/jwks.json"
+  required_aud = ["your-api"]
+  required_scopes = ["write:data"]
+  jwks_cache_seconds = 300
+  introspect_url = "https://damocles:3000/api/auth/oauth/introspect"
+  auth_type = "basic"
+  client_id = "steeze-local-cli"
+  client_secret = "local-secret"
+  cache_seconds = 300
+
+  [[receiver.pipeline]]
+  datatype = "feedback.v1"
+  transformers = ["audit-only"]

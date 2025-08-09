@@ -17,7 +17,8 @@ const (
 )
 
 type Config struct {
-	Routes []Route `toml:"route"`
+	Routes    []Route    `toml:"route"`
+	Receivers []Receiver `toml:"receiver"` // NEW
 }
 
 type Route struct {
@@ -86,6 +87,47 @@ type RelaySpec struct {
 	DataType    string `toml:"datatype,omitempty"`
 }
 
+/* ===========================
+   Receiver/Transformer config
+   =========================== */
+
+type ReceiverTLS struct {
+	Enable     bool   `toml:"enable"`
+	ServerCert string `toml:"server_cert"`
+	ServerKey  string `toml:"server_key"`
+	CA         string `toml:"ca"`
+	ServerName string `toml:"server_name"`
+}
+
+type ReceiverOAuth struct {
+	Mode           string   `toml:"mode"` // "off" | "jwt" | "introspect" | "merge"
+	IssuerBase     string   `toml:"issuer_base"`
+	JWKSURL        string   `toml:"jwks_url"`
+	RequiredAud    []string `toml:"required_aud"`
+	RequiredScopes []string `toml:"required_scopes"`
+	JWKSCacheSecs  int      `toml:"jwks_cache_seconds"`
+	IntrospectURL  string   `toml:"introspect_url"`
+	AuthType       string   `toml:"auth_type"` // "basic" | "bearer"
+	ClientID       string   `toml:"client_id"`
+	ClientSecret   string   `toml:"client_secret"`
+	BearerToken    string   `toml:"bearer_token"`
+	CacheSecs      int      `toml:"cache_seconds"`
+}
+
+type ReceiverPipeline struct {
+	DataType     string   `toml:"datatype"`     // must be registered in types_registry
+	Transformers []string `toml:"transformers"` // names registered in transform registry
+}
+
+type Receiver struct {
+	Address    string             `toml:"address"`      // host:port
+	BufferSize int                `toml:"buffer_size"`  // optional; default 1024
+	AES256Hex  string             `toml:"aes256_key_hex"`
+	TLS        *ReceiverTLS       `toml:"tls"`
+	OAuth      *ReceiverOAuth     `toml:"oauth"`
+	Pipeline   []ReceiverPipeline `toml:"pipeline"` // one or many; if many on same address you must demux by header
+}
+
 // -------- Validation / Normalization ----------
 
 func (c *Config) Validate() error {
@@ -104,6 +146,32 @@ func (c *Config) Validate() error {
 		if rs := c.Routes[i].Handler.Relay; rs != nil && strings.TrimSpace(rs.DataType) != "" {
 			if _, ok := typeReg[rs.DataType]; !ok {
 				return fmt.Errorf("handler.relay.datatype %q not registered", rs.DataType)
+			}
+		}
+	}
+
+	// Validate receivers (optional block)
+	for i := range c.Receivers {
+		rc := c.Receivers[i]
+		if strings.TrimSpace(rc.Address) == "" {
+			return fmt.Errorf("receiver %d: address required", i)
+		}
+		if rc.BufferSize < 0 {
+			return fmt.Errorf("receiver %d: buffer_size must be >= 0", i)
+		}
+		if len(rc.Pipeline) == 0 {
+			return fmt.Errorf("receiver %d: at least one pipeline required", i)
+		}
+		for j := range rc.Pipeline {
+			p := rc.Pipeline[j]
+			if strings.TrimSpace(p.DataType) == "" {
+				return fmt.Errorf("receiver %d pipeline %d: datatype required", i, j)
+			}
+			if _, ok := typeReg[p.DataType]; !ok {
+				return fmt.Errorf("receiver %d pipeline %d: datatype %q not registered", i, j, p.DataType)
+			}
+			if len(p.Transformers) == 0 {
+				return fmt.Errorf("receiver %d pipeline %d: transformers required", i, j)
 			}
 		}
 	}

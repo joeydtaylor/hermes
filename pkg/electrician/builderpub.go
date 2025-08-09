@@ -1,3 +1,4 @@
+// pkg/electrician/builderpub.go
 package electrician
 
 // Publish-only RelayClient implemented with Electrician builder primitives.

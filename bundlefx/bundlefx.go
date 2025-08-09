@@ -1,3 +1,4 @@
+// bundlefx/bundlefx.go
 package bundlefx
 
 import (

@@ -1,3 +1,4 @@
+// codec/jsoncodec.go
 package codec
 
 import (

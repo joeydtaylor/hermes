@@ -1,3 +1,4 @@
+// typedpub.go
 package electrician
 
 import (

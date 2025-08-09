@@ -25,6 +25,6 @@ COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 RUN adduser -D -H -u 10001 hermes && chown -R hermes:hermes /app
 USER hermes
 
-EXPOSE 4000
+EXPOSE 4000 50051 50052
 # keep the entrypoint simple: no sh wrappers, no cp
 ENTRYPOINT ["/app/hermes"]

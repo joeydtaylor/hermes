@@ -1,3 +1,4 @@
+// types_registry.go
 package hermes
 
 import (
@@ -62,4 +63,40 @@ func ValidateAndCanonicalize(typeName string, data []byte) (contentType string, 
 		return "", nil, fmt.Errorf("re-encode: %w", err)
 	}
 	return b.codec.ContentType(), raw, nil
+}
+
+// add to file:
+
+// GetTypeBinding exposes a safe view for internal packages.
+func GetTypeBinding(name string) (struct {
+	Name  string
+	Codec codec.Codec
+	Zero  func() any
+}, bool) {
+	b, ok := getTypeBinding(name)
+	if !ok {
+		return struct {
+			Name  string
+			Codec codec.Codec
+			Zero  func() any
+		}{}, false
+	}
+	return struct {
+		Name  string
+		Codec codec.Codec
+		Zero  func() any
+	}{Name: b.name, Codec: b.codec, Zero: b.zero}, true
+}
+
+// FindTypeNameForValue helps transformer wrappers assert the registered type of T.
+func FindTypeNameForValue[T any]() (string, bool) {
+	// We can only map from registered names -> types; iterate once.
+	for n, b := range typeReg {
+		// Compare types by creating a zero T and comparing its type to the registry’s zero.
+		var t T
+		if reflect.TypeOf(b.zero()).Elem() == reflect.TypeOf(&t).Elem() {
+			return n, true
+		}
+	}
+	return "", false
 }
