@@ -21,8 +21,8 @@ import (
 )
 
 type BuildDeps struct {
-	Auth    auth.Middleware
-	LogMW   logger.Middleware
+	Auth    *auth.Middleware
+	LogMW   *logger.Middleware
 	Metrics http.Handler
 	Relay   RelayClient
 	Router  httpx.Router
@@ -39,7 +39,19 @@ var (
 func BuildRouter(cfg Config, d BuildDeps) http.Handler {
 	r := d.Router
 	r.Use(chimd.RequestID, chimd.Recoverer, chimd.Heartbeat("/ping"))
-	r.Use(d.Auth.Middleware(), hmetrics.Collect(d.Auth), d.LogMW.Middleware(d.Auth))
+	if d.Auth != nil {
+		r.Use(d.Auth.Middleware())
+		if d.LogMW != nil {
+			r.Use(d.LogMW.Middleware(d.Auth))
+		}
+		// metrics collector that references auth state without copying it
+		r.Use(hmetrics.Collect(d.Auth))
+	} else {
+		if d.LogMW != nil {
+			r.Use(d.LogMW.Middleware(nil))
+		}
+	}
+
 	r.Handle(http.MethodGet, "/metrics", d.Metrics)
 
 	for _, rt := range cfg.Routes {
@@ -74,8 +86,18 @@ func withTimeout(next http.HandlerFunc, d time.Duration) http.HandlerFunc {
 	}
 }
 
-func withGuard(next http.HandlerFunc, a auth.Middleware, g Guard) http.HandlerFunc {
+func withGuard(next http.HandlerFunc, a *auth.Middleware, g Guard) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// If no auth middleware wired, only allow when route doesn't require auth
+		if a == nil {
+			if g.RequireAuth || len(g.Users) > 0 || len(g.Roles) > 0 {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next(w, r)
+			return
+		}
+
 		if g.RequireAuth && !a.IsAuthenticated(r.Context()) {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -188,7 +210,7 @@ func wrapRoute(rt Route, d BuildDeps) http.HandlerFunc {
 				canon = out
 			}
 
-			// 2) Publish-side transforms (manifest-driven) using registry-declared type
+			// 2) Publish-side transforms (manifest-driven)
 			if rs := rt.Handler.Relay; rs != nil && len(rs.Transformers) > 0 && typeName != "" {
 				fmt.Printf("DEBUG publish: applying %v for type %q\n", rs.Transformers, typeName)
 
@@ -198,7 +220,6 @@ func wrapRoute(rt Route, d BuildDeps) http.HandlerFunc {
 					return
 				}
 
-				// Allocate a *T, unmarshal canon JSON into it.
 				dstPtr := reflect.New(elemType).Interface()
 				if err := json.Unmarshal(canon, dstPtr); err != nil {
 					http.Error(w, "decode: "+err.Error(), http.StatusBadRequest)
@@ -233,7 +254,6 @@ func wrapRoute(rt Route, d BuildDeps) http.HandlerFunc {
 
 			// 3A) Typed path
 			if d.Typed != nil && typeName != "" {
-				// Use the same type the transform chain expects, if any; otherwise just publish bytes.
 				if _, elemType, err := transform.ResolveWithType(typeName, rt.Handler.Relay.Transformers); err == nil && elemType != nil {
 					dstPtr := reflect.New(elemType).Interface()
 					if err := json.Unmarshal(canon, dstPtr); err != nil {

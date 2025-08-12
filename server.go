@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"log"
 	"net/http"
 	"os"
 	"time"
@@ -60,17 +59,19 @@ func provideRelayForHermes() (hermes.RelayClient, error) {
 }
 
 func provideRouter(
-	a auth.Middleware,
-	lm logger.Middleware,
+	a *auth.Middleware,
+	lm *logger.Middleware,
 	/* name:"metrics" */ m http.Handler,
 	typed hermes.TypedPublisher,
 	rel hermes.RelayClient,
 	r httpx.Router,
 	zl *zap.Logger,
 ) http.Handler {
-	cfg, err := hermes.LoadConfig(envOr("HERMES_MANIFEST", "manifest.toml"))
+	cfgPath := envOr("HERMES_MANIFEST", "manifest.toml")
+	cfg, err := hermes.LoadConfig(cfgPath)
 	if err != nil {
-		log.Fatalf("manifest load: %v", err)
+		// keep this fatal so the app doesn't boot with an unknown routing table
+		zl.Fatal("manifest load failed", zap.Error(err), zap.String("path", cfgPath))
 	}
 
 	// If the manifest has any relay.publish handlers, ensure RelayClient is present.
@@ -93,8 +94,8 @@ func provideRouter(
 	}
 
 	return hermes.BuildRouter(cfg, hermes.BuildDeps{
-		Auth:    a,
-		LogMW:   lm,
+		Auth:    a,  // *auth.Middleware
+		LogMW:   lm, // *logger.Middleware
 		Metrics: m,
 		Relay:   rel,
 		Typed:   typed,

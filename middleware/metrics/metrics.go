@@ -1,4 +1,3 @@
-// metrics/metrics.go
 package metrics
 
 import (
@@ -38,7 +37,7 @@ var (
 	)
 )
 
-func Collect(ca auth.Middleware) func(next http.Handler) http.Handler {
+func Collect(ca *auth.Middleware) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
@@ -47,7 +46,10 @@ func Collect(ca auth.Middleware) func(next http.Handler) http.Handler {
 			defer func() {
 				endTime := time.Since(startTime)
 				if r.URL.Path != "/metrics" {
-					role := ca.GetUser(r.Context()).Role.Name
+					role := ""
+					if ca != nil {
+						role = ca.GetUser(r.Context()).Role.Name
+					}
 					code := strconv.Itoa(ww.Status())
 					uri := r.URL.Path // path only; avoid cardinality explosion
 					method := r.Method

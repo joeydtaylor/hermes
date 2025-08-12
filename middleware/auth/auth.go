@@ -16,6 +16,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -48,12 +49,15 @@ type Middleware struct {
 	devBypass  bool
 
 	// Assertion verification
-	assertKeyURL   string
-	assertKeyKID   string
-	assertIssuer   string
-	assertAudience string
-	assertLeeway   time.Duration
+	assertCookieName string
+	assertKeyURL     string
+	assertKeyKID     string
+	assertIssuer     string
+	assertAudience   string
+	assertLeeway     time.Duration
 
+	// guarded by mu
+	mu         sync.RWMutex
 	assertKey  *rsa.PublicKey
 	assertETag string
 	cacheTTL   time.Duration
@@ -62,7 +66,7 @@ type Middleware struct {
 
 // -------------------- DI provider --------------------
 
-func ProvideAuthentication() Middleware {
+func ProvideAuthentication() *Middleware {
 	hc := &http.Client{
 		Transport: &http.Transport{
 			MaxIdleConns:       10,
@@ -72,30 +76,34 @@ func ProvideAuthentication() Middleware {
 		Timeout: 8 * time.Second,
 	}
 
-	m := Middleware{
-		httpClient:   hc,
-		sessionAPI:   os.Getenv("SESSION_STATE_API"),
-		cookieName:   os.Getenv("SESSION_COOKIE_NAME"),
-		adminRole:    os.Getenv("ADMIN_ROLE_NAME"),
-		devBypass:    os.Getenv("AUTH_DEV_BYPASS") == "true",
-		assertKeyURL: strings.TrimSpace(os.Getenv("ASSERTION_KEY_URL")),
-		assertKeyKID: strings.TrimSpace(os.Getenv("ASSERTION_KEY_KID")),
-		assertIssuer: strings.TrimSpace(os.Getenv("ASSERTION_ISSUER")),
-		assertAudience: strings.TrimSpace(
-			os.Getenv("ASSERTION_AUDIENCE"),
-		),
-		assertLeeway: func() time.Duration {
-			if v := strings.TrimSpace(os.Getenv("ASSERTION_LEEWAY_SECONDS")); v != "" {
-				if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-					return time.Duration(n) * time.Second
-				}
-			}
-			return 60 * time.Second
-		}(),
-		cacheTTL: 1 * time.Hour, // default; can be overridden by Cache-Control
+	leeway := 60 * time.Second
+	if v := strings.TrimSpace(os.Getenv("ASSERTION_LEEWAY_SECONDS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			leeway = time.Duration(n) * time.Second
+		}
 	}
 
-	// Fetch assertion key on startup (non-fatal if missing; you may want to hard-fail instead)
+	assertCookie := strings.TrimSpace(os.Getenv("ASSERTION_COOKIE_NAME"))
+	if assertCookie == "" {
+		assertCookie = "assert"
+	}
+
+	m := &Middleware{
+		httpClient:       hc,
+		sessionAPI:       os.Getenv("SESSION_STATE_API"),
+		cookieName:       os.Getenv("SESSION_COOKIE_NAME"),
+		adminRole:        os.Getenv("ADMIN_ROLE_NAME"),
+		devBypass:        os.Getenv("AUTH_DEV_BYPASS") == "true",
+		assertCookieName: assertCookie,
+		assertKeyURL:     strings.TrimSpace(os.Getenv("ASSERTION_KEY_URL")), // JWKS/PEM endpoint
+		assertKeyKID:     strings.TrimSpace(os.Getenv("ASSERTION_KEY_KID")),
+		assertIssuer:     strings.TrimSpace(os.Getenv("ASSERTION_ISSUER")),
+		assertAudience:   strings.TrimSpace(os.Getenv("ASSERTION_AUDIENCE")),
+		assertLeeway:     leeway,
+		cacheTTL:         1 * time.Hour, // default; overridable by Cache-Control
+	}
+
+	// Fetch assertion key on startup (non-fatal)
 	if m.assertKeyURL != "" {
 		if err := m.refreshAssertionKey(context.Background()); err == nil {
 			go m.backgroundRefresh()
@@ -108,22 +116,27 @@ func ProvideAuthentication() Middleware {
 // -------------------- Key refresh logic --------------------
 
 func (m *Middleware) backgroundRefresh() {
-	t := time.NewTimer(m.cacheTTL)
-	defer t.Stop()
 	for {
-		<-t.C
+		sleep := m.getCacheTTL()
+		if sleep < 5*time.Second {
+			sleep = 5 * time.Second
+		}
+		time.Sleep(sleep)
 		_ = m.refreshAssertionKey(context.Background())
-		t.Reset(m.cacheTTL)
 	}
 }
 
 func (m *Middleware) refreshAssertionKey(ctx context.Context) error {
+	if m.assertKeyURL == "" {
+		return errors.New("ASSERTION_KEY_URL not set")
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.assertKeyURL, nil)
 	if err != nil {
 		return err
 	}
-	if m.assertETag != "" {
-		req.Header.Set("If-None-Match", m.assertETag)
+	if etag := m.getETag(); etag != "" {
+		req.Header.Set("If-None-Match", etag)
 	}
 	req.Header.Set("Accept", "*/*")
 
@@ -134,9 +147,9 @@ func (m *Middleware) refreshAssertionKey(ctx context.Context) error {
 	defer res.Body.Close()
 
 	// Honor 304 with previous key
-	if res.StatusCode == http.StatusNotModified && m.assertKey != nil {
+	if res.StatusCode == http.StatusNotModified && m.getKey() != nil {
 		m.updateCacheTTLFromHeaders(res)
-		m.lastFetch = time.Now()
+		m.setLastFetch(time.Now())
 		return nil
 	}
 	if res.StatusCode < 200 || res.StatusCode > 299 {
@@ -145,6 +158,7 @@ func (m *Middleware) refreshAssertionKey(ctx context.Context) error {
 
 	ct := strings.ToLower(strings.TrimSpace(res.Header.Get("Content-Type")))
 	var pub *rsa.PublicKey
+
 	if strings.Contains(ct, "application/json") || strings.HasSuffix(strings.ToLower(m.assertKeyURL), ".json") {
 		// JWKS
 		var jwks struct {
@@ -160,10 +174,11 @@ func (m *Middleware) refreshAssertionKey(ctx context.Context) error {
 		if err := json.NewDecoder(res.Body).Decode(&jwks); err != nil {
 			return err
 		}
+
 		var sel *struct {
 			Kty, Use, Alg, Kid, N, E string
 		}
-		// Prefer configured KID if any; else first RSA sig key (RS256)
+
 		for i := range jwks.Keys {
 			k := &jwks.Keys[i]
 			if k.Kty != "RSA" {
@@ -178,7 +193,8 @@ func (m *Middleware) refreshAssertionKey(ctx context.Context) error {
 				}
 				continue
 			}
-			if (k.Use == "" || k.Use == "sig") && (k.Alg == "" || k.Alg == "RS256") {
+			// default: first RSA signing key (RS256)
+			if (k.Use == "" || k.Use == "sig") && (k.Alg == "" || strings.EqualFold(k.Alg, "RS256")) {
 				sel = &struct {
 					Kty, Use, Alg, Kid, N, E string
 				}{k.Kty, k.Use, k.Alg, k.Kid, k.N, k.E}
@@ -221,14 +237,23 @@ func (m *Middleware) refreshAssertionKey(ctx context.Context) error {
 		pub = rk
 	}
 
+	// commit new state under lock
+	m.mu.Lock()
 	m.assertKey = pub
 	m.assertETag = res.Header.Get("ETag")
-	m.updateCacheTTLFromHeaders(res)
+	m.updateCacheTTLFromHeadersLocked(res) // expects m.mu held
 	m.lastFetch = time.Now()
+	m.mu.Unlock()
 	return nil
 }
 
 func (m *Middleware) updateCacheTTLFromHeaders(res *http.Response) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.updateCacheTTLFromHeadersLocked(res)
+}
+
+func (m *Middleware) updateCacheTTLFromHeadersLocked(res *http.Response) {
 	cc := res.Header.Get("Cache-Control")
 	if cc == "" {
 		return
@@ -245,12 +270,38 @@ func (m *Middleware) updateCacheTTLFromHeaders(res *http.Response) {
 	}
 }
 
+func (m *Middleware) getKey() *rsa.PublicKey {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.assertKey
+}
+
+func (m *Middleware) getETag() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.assertETag
+}
+
+func (m *Middleware) getCacheTTL() time.Duration {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.cacheTTL
+}
+
+func (m *Middleware) setLastFetch(t time.Time) {
+	m.mu.Lock()
+	m.lastFetch = t
+	m.mu.Unlock()
+}
+
 // -------------------- Assertion validation --------------------
 
-func (m Middleware) validateAssertion(raw string) (User, error) {
-	if m.assertKey == nil {
+func (m *Middleware) validateAssertion(raw string) (User, error) {
+	pub := m.getKey()
+	if pub == nil {
 		return User{}, errors.New("assertion key not configured")
 	}
+
 	parser := jwt.NewParser(
 		jwt.WithValidMethods([]string{"RS256"}),
 		jwt.WithIssuedAt(),
@@ -267,26 +318,26 @@ func (m Middleware) validateAssertion(raw string) (User, error) {
 		Role  string   `json:"role"`
 	}
 
-	token, err := parser.ParseWithClaims(raw, &claims, func(t *jwt.Token) (any, error) {
-		// NOTE: If you later want kid-based key selection, switch to a JWKS cache + Keyfunc.
-		return m.assertKey, nil
+	tok, err := parser.ParseWithClaims(raw, &claims, func(t *jwt.Token) (any, error) {
+		return pub, nil
 	})
-	if err != nil || !token.Valid {
+	if err != nil || !tok.Valid {
 		return User{}, errors.New("invalid assertion")
 	}
 
 	if m.assertIssuer != "" && claims.Issuer != m.assertIssuer {
 		return User{}, errors.New("bad issuer")
 	}
+
 	if m.assertAudience != "" {
-		ok := false
+		found := false
 		for _, a := range claims.Audience {
 			if a == m.assertAudience {
-				ok = true
+				found = true
 				break
 			}
 		}
-		if !ok {
+		if !found {
 			return User{}, errors.New("bad audience")
 		}
 	}
@@ -308,7 +359,7 @@ func (m Middleware) validateAssertion(raw string) (User, error) {
 
 // -------------------- HTTP middleware --------------------
 
-func (m Middleware) Middleware() func(http.Handler) http.Handler {
+func (m *Middleware) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Dev bypass for local testing (NEVER enable in prod)
@@ -320,8 +371,8 @@ func (m Middleware) Middleware() func(http.Handler) http.Handler {
 				}
 			}
 
-			// 1) If "assert" cookie present, validate locally
-			if ac, _ := r.Cookie("assert"); ac != nil && ac.Value != "" && m.assertKey != nil {
+			// 1) If assertion cookie present, validate locally
+			if ac, _ := r.Cookie(m.assertCookieName); ac != nil && ac.Value != "" && m.getKey() != nil {
 				if u, err := m.validateAssertion(ac.Value); err == nil && u.Username != "" {
 					ctx := context.WithValue(r.Context(), userCtxKey, u)
 					next.ServeHTTP(w, r.WithContext(ctx))
@@ -330,7 +381,7 @@ func (m Middleware) Middleware() func(http.Handler) http.Handler {
 				// fall through on error; do not 401 yet
 			}
 
-			// 2) Fallback to legacy session API if session cookie present
+			// 2) Fallback to session API if session cookie present
 			if m.cookieName != "" {
 				if c, err := r.Cookie(m.cookieName); err == nil && c != nil && c.Value != "" {
 					if u, err := m.validateSession(r.Context(), c); err == nil && u.Username != "" {
@@ -349,7 +400,7 @@ func (m Middleware) Middleware() func(http.Handler) http.Handler {
 	}
 }
 
-func (m Middleware) validateSession(ctx context.Context, c *http.Cookie) (User, error) {
+func (m *Middleware) validateSession(ctx context.Context, c *http.Cookie) (User, error) {
 	if m.sessionAPI == "" {
 		return User{}, errors.New("SESSION_STATE_API not set")
 	}
@@ -379,40 +430,35 @@ func (m Middleware) validateSession(ctx context.Context, c *http.Cookie) (User, 
 
 // -------------------- helpers / predicates --------------------
 
-/* Get user from context */
-func (Middleware) GetUser(ctx context.Context) User {
+func (m *Middleware) GetUser(ctx context.Context) User {
 	if user, ok := ctx.Value(userCtxKey).(User); ok {
 		return user
 	}
 	return User{}
 }
 
-/* Validate user has role by name (or is admin) */
-func (m Middleware) IsRole(ctx context.Context, role Role) bool {
+func (m *Middleware) IsRole(ctx context.Context, role Role) bool {
 	if u, ok := ctx.Value(userCtxKey).(User); ok {
 		return u.Role.Name == role.Name || (m.adminRole != "" && u.Role.Name == m.adminRole)
 	}
 	return false
 }
 
-/* Validate user is admin */
-func (m Middleware) IsAdmin(ctx context.Context) bool {
+func (m *Middleware) IsAdmin(ctx context.Context) bool {
 	if u, ok := ctx.Value(userCtxKey).(User); ok && m.adminRole != "" {
 		return u.Role.Name == m.adminRole
 	}
 	return false
 }
 
-/* Validate user is Username (or admin) */
-func (m Middleware) IsUser(ctx context.Context, username string) bool {
+func (m *Middleware) IsUser(ctx context.Context, username string) bool {
 	if u, ok := ctx.Value(userCtxKey).(User); ok {
 		return u.Username == username || (m.adminRole != "" && u.Role.Name == m.adminRole)
 	}
 	return false
 }
 
-/* Validate user is authenticated */
-func (Middleware) IsAuthenticated(ctx context.Context) bool {
+func (m *Middleware) IsAuthenticated(ctx context.Context) bool {
 	u, ok := ctx.Value(userCtxKey).(User)
 	return ok && u.Username != ""
 }
@@ -469,6 +515,3 @@ func bytesToInt(b []byte) int {
 	}
 	return n
 }
-
-// ioReadAll: local copy to avoid importing io for one call in older Go toolchains.
-func ioReadAll(r http.ResponseWriter) ([]byte, error) { return nil, errors.New("unreachable") }

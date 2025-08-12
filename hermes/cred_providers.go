@@ -64,12 +64,15 @@ func (p StaticBearerProvider) Issue(_ context.Context, _ *http.Request, _ Route)
 }
 
 type TokenExchangeProvider struct {
-	Auth auth.Middleware
+	Auth *auth.Middleware // <- pointer to avoid copying mutex
 	// Real impl would call an exchange service using:
 	//   TOKEN_EXCHANGE_URL, TOKEN_EXCHANGE_TIMEOUT_MS, etc.
 }
 
 func (p TokenExchangeProvider) Issue(ctx context.Context, r *http.Request, route Route) (DownstreamCredentials, error) {
+	if p.Auth == nil {
+		return DownstreamCredentials{}, nil
+	}
 	u := p.Auth.GetUser(r.Context())
 	if u.Username == "" {
 		return DownstreamCredentials{}, nil

@@ -1,4 +1,3 @@
-// request_logger.go
 package logger
 
 import (
@@ -23,8 +22,8 @@ import (
 
 type Middleware struct{}
 
-func ProvideLoggerMiddleware() Middleware { return Middleware{} }
-func ProvideLogger() *zap.Logger          { return NewLog("system.log") }
+func ProvideLoggerMiddleware() *Middleware { return &Middleware{} }
+func ProvideLogger() *zap.Logger           { return NewLog("system.log") }
 
 // package-level singleton for access logs
 var httpAccessLogger = NewLog("http-access.log")
@@ -64,7 +63,7 @@ func NewLog(n string) *zap.Logger {
 	return zap.New(core)
 }
 
-func (Middleware) Middleware(ca auth.Middleware) func(next http.Handler) http.Handler {
+func (m *Middleware) Middleware(ca *auth.Middleware) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			l := httpAccessLogger
@@ -91,17 +90,28 @@ func (Middleware) Middleware(ca auth.Middleware) func(next http.Handler) http.Ha
 			defer func() {
 				lat := time.Since(start)
 
-				// bounded URI (path only) to avoid metric/log cardinality blowups
-				pathOnly := r.URL.Path
+				// nil-safe auth lookups
+				isAuth := false
+				username := ""
+				role := ""
+				provider := ""
+				if ca != nil {
+					isAuth = ca.IsAuthenticated(r.Context())
+					u := ca.GetUser(r.Context())
+					username = u.Username
+					role = u.Role.Name
+					provider = u.AuthenticationSource.Provider
+				}
 
+				pathOnly := r.URL.Path
 				log := l.With(
 					zap.String("dateTime", start.UTC().Format(time.RFC1123)),
 					zap.String("requestId", chimd.GetReqID(r.Context())),
 					zap.String("httpScheme", scheme),
-					zap.Bool("isAuthenticated", ca.IsAuthenticated(r.Context())),
-					zap.String("username", ca.GetUser(r.Context()).Username),
-					zap.String("role", ca.GetUser(r.Context()).Role.Name),
-					zap.String("authenticationProvider", ca.GetUser(r.Context()).AuthenticationSource.Provider),
+					zap.Bool("isAuthenticated", isAuth),
+					zap.String("username", username),
+					zap.String("role", role),
+					zap.String("authenticationProvider", provider),
 					zap.String("httpProto", r.Proto),
 					zap.String("httpMethod", r.Method),
 					zap.String("remoteAddr", r.RemoteAddr),
