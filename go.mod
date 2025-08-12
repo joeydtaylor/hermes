@@ -10,6 +10,7 @@ require github.com/joho/godotenv v1.4.0
 
 require (
 	github.com/go-chi/chi v1.5.4
+	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/joeydtaylor/electrician v0.0.0-20250808223012-ae92b707bab7
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/prometheus/client_golang v1.12.1
