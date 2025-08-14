@@ -1,3 +1,4 @@
+// hermes/manifest.go
 package hermes
 
 import (

@@ -1,3 +1,4 @@
+// hermes/transform/registry.go
 package transform
 
 import (

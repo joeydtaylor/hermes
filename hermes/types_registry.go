@@ -1,4 +1,4 @@
-// types_registry.go
+// hermes/types_registry.go
 package hermes
 
 import (

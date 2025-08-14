@@ -1,3 +1,4 @@
+// app/types/register.go
 package types
 
 import (

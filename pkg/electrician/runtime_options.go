@@ -1,4 +1,4 @@
-// runtime_options.go
+// pkg/electrician/runtime_options.go
 package electrician
 
 import (

@@ -1,3 +1,7 @@
+# =========================
+# Routes (publish-only)
+# =========================
+
 # 3) Auth-required relay.publish (cookie passthrough downstream; no reply)
 [[route]]
 path   = "/orders"
@@ -17,7 +21,7 @@ codec  = "json"
     expect_reply = false
     deadline_ms  = 4000
     datatype     = "feedback.v1"
-    transformers = ["tagger", "sentiment"]   # <-- apply our transformer before publish
+    transformers = ["tagger", "sentiment"]
 
 # 4) Open relay.publish (no auth, no downstream creds)
 [[route]]
@@ -54,9 +58,11 @@ codec  = "json"
     deadline_ms  = 4000
     datatype     = "feedback.v1"
 
-# existing routes…
+# =========================
+# Receivers (for dev)
+# =========================
 
-# receiver A: apply sentiment then tagger on feedback.v1
+# receiver A
 [[receiver]]
 address = "0.0.0.0:50051"
 buffer_size = 1024
@@ -64,9 +70,9 @@ aes256_key_hex = "ea8ccb51eefcdd058b0110c4adebaf351acbf43db2ad250fdc0d4131c959df
 
   [receiver.tls]
   enable = true
-  server_cert = "tls/server.crt"
-  server_key  = "tls/server.key"
-  ca          = "tls/ca.crt"
+  server_cert = "/app/etc/keys/tls/server.crt"
+  server_key  = "/app/etc/keys/tls/server.key"
+  ca          = "/app/etc/keys/tls/ca.crt"
   server_name = "localhost"
 
   [receiver.oauth]
@@ -86,7 +92,7 @@ aes256_key_hex = "ea8ccb51eefcdd058b0110c4adebaf351acbf43db2ad250fdc0d4131c959df
   datatype = "feedback.v1"
   transformers = ["sentiment", "tagger"]
 
-# receiver B: same TLS/AES/OAuth as 50051, different pipeline
+# receiver B
 [[receiver]]
 address = "0.0.0.0:50052"
 buffer_size = 1024
@@ -94,9 +100,9 @@ aes256_key_hex = "ea8ccb51eefcdd058b0110c4adebaf351acbf43db2ad250fdc0d4131c959df
 
   [receiver.tls]
   enable = true
-  server_cert = "tls/server.crt"
-  server_key  = "tls/server.key"
-  ca          = "tls/ca.crt"
+  server_cert = "/app/etc/keys/tls/server.crt"
+  server_key  = "/app/etc/keys/tls/server.key"
+  ca          = "/app/etc/keys/tls/ca.crt"
   server_name = "localhost"
 
   [receiver.oauth]
