@@ -2,7 +2,7 @@
 # Routes (publish-only)
 # =========================
 
-# 3) Auth-required relay.publish (cookie passthrough downstream; no reply)
+# 3) Auth-required relay.publish (no cookie passthrough; use static bearer for now)
 [[route]]
 path   = "/orders"
 method = "POST"
@@ -13,7 +13,7 @@ codec  = "json"
   [route.policy]
   timeout_ms = 5000
   [route.policy.downstream_auth]
-  type = "passthrough-cookie"
+  type = "static-bearer"
   [route.handler]
   type = "relay.publish"
     [route.handler.relay]

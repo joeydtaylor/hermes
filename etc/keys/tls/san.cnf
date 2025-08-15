@@ -28,4 +28,5 @@ DNS.1 = localhost
 DNS.2 = hermes
 DNS.3 = host.docker.internal
 DNS.4 = damocles
+DNS.5 = redpanda
 IP.1  = 127.0.0.1
