@@ -1,28 +1,23 @@
 # =========================
-# Routes (inproc)
+# Routes (inproc) — FIXED
 # =========================
 
-# GET /healthz  -> handlers.Register("health.ok", ...)
 [[route]]
 path   = "/healthz"
 method = "GET"
 codec  = "json"
   [route.handler]
   type = "inproc"
-    [route.handler.inproc]
-    name = "health.ok"
+  name = "health.ok"
 
-# POST /echo -> handlers.Register("echo.body", ...)
 [[route]]
 path   = "/echo"
 method = "POST"
 codec  = "json"
   [route.handler]
   type = "inproc"
-    [route.handler.inproc]
-    name = "echo.body"
+  name = "echo.body"
 
-# GET /admin/ping (authz via roles) -> handlers.Register("admin.ping", ...)
 [[route]]
 path   = "/admin/ping"
 method = "GET"
@@ -32,8 +27,7 @@ codec  = "json"
   roles = ["admin","developer"]
   [route.handler]
   type = "inproc"
-    [route.handler.inproc]
-    name = "admin.ping"
+  name = "admin.ping"
 
 # =========================
 # Routes (publish-only)
