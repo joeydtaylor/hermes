@@ -77,6 +77,10 @@ github.com/joeydtaylor/steeze-core v0.0.0-20250816024228-ec033fa79c49 h1:cu03NHR
 github.com/joeydtaylor/steeze-core v0.0.0-20250816024228-ec033fa79c49/go.mod h1:jFIwvC/cXyXf447znTB6kpG+YqvtQcIbc5P5gED9URs=
 github.com/joeydtaylor/steeze-core v0.0.0-20250816031841-4920868f177a h1:FCZ3+sMop9f5sVKlHgrMHjNm2DilBdeSKkqK9b2No/8=
 github.com/joeydtaylor/steeze-core v0.0.0-20250816031841-4920868f177a/go.mod h1:RPkb1nfdUEP7nXtGl6F1AnFcq13TeD9SlZIKShEPKHw=
+github.com/joeydtaylor/steeze-core v0.0.0-20250816042805-e334647f3a48 h1:BZTYKnsm47diGC1Pl5g/DK9YYC8JbLLxFiE5QtDvNKs=
+github.com/joeydtaylor/steeze-core v0.0.0-20250816042805-e334647f3a48/go.mod h1:RPkb1nfdUEP7nXtGl6F1AnFcq13TeD9SlZIKShEPKHw=
+github.com/joeydtaylor/steeze-core v0.0.0-20250816043451-7ce4683a553d h1:BeXqiYg8h03JqCqL0h+PHxcLCYZQBhEkZ/lSSrvCgYQ=
+github.com/joeydtaylor/steeze-core v0.0.0-20250816043451-7ce4683a553d/go.mod h1:RPkb1nfdUEP7nXtGl6F1AnFcq13TeD9SlZIKShEPKHw=
 github.com/joho/godotenv v1.4.0 h1:3l4+N6zfMWnkbPEXKng2o2/MR5mSwTrBih4ZEkkz1lg=
 github.com/joho/godotenv v1.4.0/go.mod h1:f4LDr5Voq0i2e/R5DDNOoa2zzDfwtkZa6DnEwAbqwq4=
 github.com/klauspost/compress v1.15.9/go.mod h1:PhcZ0MbTNciWF3rruxRgKxI5NkcHHrHUDtV4Yw2GlzU=
