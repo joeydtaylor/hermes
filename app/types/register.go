@@ -4,10 +4,10 @@ package types
 import (
 	"strings"
 
-	"github.com/joeydtaylor/hermes/hermes"
-	"github.com/joeydtaylor/hermes/hermes/codec"
-	"github.com/joeydtaylor/hermes/hermes/transform"
-	"github.com/joeydtaylor/hermes/pkg/electrician"
+	"github.com/joeydtaylor/steeze-core/pkg/codec"
+	"github.com/joeydtaylor/steeze-core/pkg/core"
+	"github.com/joeydtaylor/steeze-core/pkg/core/transform"
+	"github.com/joeydtaylor/steeze-core/pkg/electrician"
 )
 
 type Feedback struct {
@@ -19,7 +19,7 @@ type Feedback struct {
 }
 
 func RegisterAll() {
-	hermes.MustRegisterType[Feedback]("feedback.v1", codec.JSONStrict)
+	core.MustRegisterType[Feedback]("feedback.v1", codec.JSONStrict)
 	electrician.EnableBuilderType[Feedback]("feedback.v1")
 
 	// Manifest-visible transformers for feedback.v1

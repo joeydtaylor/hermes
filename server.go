@@ -10,17 +10,19 @@ import (
 
 	"github.com/joeydtaylor/hermes/app/handlers"
 	"github.com/joeydtaylor/hermes/app/types"
-	"github.com/joeydtaylor/hermes/hermes"
-	"github.com/joeydtaylor/hermes/middleware/auth"
-	"github.com/joeydtaylor/hermes/middleware/logger"
-	"github.com/joeydtaylor/hermes/middleware/metrics"
-	"github.com/joeydtaylor/hermes/transport/httpx"
+	"github.com/joeydtaylor/steeze-core/pkg/core"
+
+	"github.com/joeydtaylor/steeze-core/pkg/manifest"
+	"github.com/joeydtaylor/steeze-core/pkg/middleware/auth"
+	"github.com/joeydtaylor/steeze-core/pkg/middleware/logger"
+	"github.com/joeydtaylor/steeze-core/pkg/middleware/metrics"
+	"github.com/joeydtaylor/steeze-core/pkg/transport/httpx"
 	"github.com/joho/godotenv"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 
 	// Electrician adapters (forward relay / typed publisher)
-	"github.com/joeydtaylor/hermes/pkg/electrician"
+	"github.com/joeydtaylor/steeze-core/pkg/electrician"
 )
 
 // ---- Adapter: electrician.RelayClient -> hermes.RelayClient ----
@@ -29,7 +31,7 @@ type relayAdapter struct {
 	inner electrician.RelayClient
 }
 
-func (a relayAdapter) Request(ctx context.Context, rr hermes.RelayRequest) ([]byte, error) {
+func (a relayAdapter) Request(ctx context.Context, rr core.RelayRequest) ([]byte, error) {
 	return a.inner.Request(ctx, electrician.RelayRequest{
 		Topic:   rr.Topic,
 		Body:    rr.Body,
@@ -37,7 +39,7 @@ func (a relayAdapter) Request(ctx context.Context, rr hermes.RelayRequest) ([]by
 	})
 }
 
-func (a relayAdapter) Publish(ctx context.Context, rr hermes.RelayRequest) error {
+func (a relayAdapter) Publish(ctx context.Context, rr core.RelayRequest) error {
 	return a.inner.Publish(ctx, electrician.RelayRequest{
 		Topic:   rr.Topic,
 		Body:    rr.Body,
@@ -46,7 +48,7 @@ func (a relayAdapter) Publish(ctx context.Context, rr hermes.RelayRequest) error
 }
 
 // Provide a hermes.RelayClient by constructing the electrician client and wrapping it.
-func provideRelayForHermes() (hermes.RelayClient, error) {
+func provideRelayForHermes() (core.RelayClient, error) {
 	ec, err := electrician.NewBuilderRelayFromEnv()
 	if err != nil {
 		return nil, err
@@ -62,13 +64,13 @@ func provideRouter(
 	a *auth.Middleware,
 	lm *logger.Middleware,
 	/* name:"metrics" */ m http.Handler,
-	typed hermes.TypedPublisher,
-	rel hermes.RelayClient,
+	typed core.TypedPublisher,
+	rel core.RelayClient,
 	r httpx.Router,
 	zl *zap.Logger,
 ) http.Handler {
 	cfgPath := envOr("HERMES_MANIFEST", "manifest.toml")
-	cfg, err := hermes.LoadConfig(cfgPath)
+	cfg, err := core.LoadConfig(cfgPath)
 	if err != nil {
 		// keep this fatal so the app doesn't boot with an unknown routing table
 		zl.Fatal("manifest load failed", zap.Error(err), zap.String("path", cfgPath))
@@ -77,7 +79,7 @@ func provideRouter(
 	// If the manifest has any relay.publish handlers, ensure RelayClient is present.
 	needsRelay := false
 	for _, rt := range cfg.Routes {
-		if rt.Handler.Type == hermes.HandlerType("relay.publish") {
+		if rt.Handler.Type == manifest.HandlerType("relay.publish") {
 			needsRelay = true
 			break
 		}
@@ -93,7 +95,7 @@ func provideRouter(
 		// zl.Fatal("relay client missing; check ELECTRICIAN_TARGET and OAUTH_* env")
 	}
 
-	return hermes.BuildRouter(cfg, hermes.BuildDeps{
+	return core.BuildRouter(cfg, core.BuildDeps{
 		Auth:    a,  // *auth.Middleware
 		LogMW:   lm, // *logger.Middleware
 		Metrics: m,
@@ -127,7 +129,7 @@ func registerHooks(lc fx.Lifecycle, d serverDeps) {
 
 	// Load manifest once to boot any receivers.
 	cfgPath := envOr("HERMES_MANIFEST", "manifest.toml")
-	cfg, err := hermes.LoadConfig(cfgPath)
+	cfg, err := core.LoadConfig(cfgPath)
 	if err != nil {
 		d.Logger.Fatal("manifest load failed", zap.Error(err), zap.String("path", cfgPath))
 	}
@@ -241,7 +243,7 @@ func main() {
 		fx.Provide(
 			fx.Annotate(
 				electrician.NewTypedPublisherFromEnv,
-				fx.As(new(hermes.TypedPublisher)),
+				fx.As(new(core.TypedPublisher)),
 			),
 		),
 		// - byte relay client (wrap electrician client into hermes interface)
