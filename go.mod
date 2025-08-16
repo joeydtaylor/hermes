@@ -9,7 +9,7 @@ require github.com/go-chi/chi/v5 v5.2.2 // indirect
 require github.com/joho/godotenv v1.4.0
 
 require (
-	github.com/joeydtaylor/steeze-core v0.0.0-20250816012026-547a523ef424
+	github.com/joeydtaylor/steeze-core v0.0.0-20250816031841-4920868f177a
 	go.uber.org/fx v1.24.0
 	go.uber.org/zap v1.27.0
 )
